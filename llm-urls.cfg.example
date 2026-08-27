@@ -1,0 +1,19 @@
+# Local-only config for tracking LLM API endpoints.
+#
+# Copy this file to "llm-urls.cfg" (already gitignored) and fill in your real
+# endpoints. This file must NEVER contain actual API keys - only the NAME of
+# the environment variable (set in your local .env) that holds the key.
+#
+# Format (one entry per line):
+#   key=endpoint_url|model_name|API_KEY_ENV_VAR_NAME
+#
+# - key: a short identifier, used as the log file name (letters/numbers/dashes)
+# - endpoint_url: a lightweight GET endpoint to check reachability/auth
+#   (e.g. a "list models" endpoint), not a full chat completion call
+# - model_name: for your own reference only (not required by the script)
+# - API_KEY_ENV_VAR_NAME: the name of the variable in your .env file, e.g.
+#   OPENAI_API_KEY (NOT the key value itself)
+
+openai-gpt4=https://api.openai.com/v1/models|gpt-4o|OPENAI_API_KEY
+anthropic-claude=https://api.anthropic.com/v1/models|claude-3-opus|ANTHROPIC_API_KEY
+azure-gpt4=https://myresource.openai.azure.com/openai/deployments|gpt-4|AZURE_OPENAI_API_KEY

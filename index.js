@@ -33,8 +33,8 @@ function removeCustomUrl(key) {
   saveCustomUrls(getCustomUrls().filter((entry) => entry.key !== key));
 }
 
-async function genReportLog(container, key, url, isCustom) {
-  const response = await fetch("logs/" + key + "_report.log");
+async function genReportLog(container, key, url, isCustom, logDir) {
+  const response = await fetch((logDir || "logs") + "/" + key + "_report.log");
   let statusLines = "";
   if (response.ok) {
     statusLines = await response.text();
@@ -318,8 +318,15 @@ function splitRowsByDate(rows) {
     }
 
     let result = 0;
-    if (resultStr.trim() == "success") {
+    const trimmedResult = resultStr.trim();
+    if (trimmedResult == "success") {
       result = 1;
+    } else if (trimmedResult == "partial") {
+      // Reachable but not fully functional (e.g. an LLM endpoint responding
+      // with an auth error, such as an expired API key). Weighted midway so
+      // it renders as the existing "partial" orange state instead of a full
+      // outage.
+      result = 0.5;
     }
     sum += result;
     count++;
@@ -379,7 +386,34 @@ async function genAllReports() {
       continue;
     }
 
-    await genReportLog(reportsContainer, key.trim(), url.trim(), false);
+    await genReportLog(reportsContainer, key.trim(), url.trim(), false, "logs");
+  }
+
+  // Optionally render locally tracked LLM endpoints from llm-urls.cfg, if
+  // present. This file and its private-logs/ results are gitignored and
+  // populated only by running llm-health-check.sh locally - on GitHub Pages
+  // (or any checkout without it) this fetch simply 404s and is skipped.
+  try {
+    const llmResponse = await fetch("llm-urls.cfg");
+    if (llmResponse.ok) {
+      const llmConfigText = await llmResponse.text();
+      const llmConfigLines = llmConfigText.split("\n");
+      for (let ii = 0; ii < llmConfigLines.length; ii++) {
+        const configLine = llmConfigLines[ii].trim();
+        if (!configLine || configLine.startsWith("#")) {
+          continue;
+        }
+        const [key, rest] = configLine.split("=");
+        const [url] = (rest || "").split("|");
+        if (!key || !url) {
+          continue;
+        }
+
+        await genReportLog(reportsContainer, key.trim(), url.trim(), false, "private-logs");
+      }
+    }
+  } catch (e) {
+    // llm-urls.cfg not available - nothing to render.
   }
 }
 

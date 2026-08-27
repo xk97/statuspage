@@ -1,1 +1,8 @@
 logs
+
+# Local-only LLM endpoint tracking: never commit secrets or your real
+# endpoint list. See llm-urls.cfg.example for the format.
+.env
+.env.*
+llm-urls.cfg
+private-logs
