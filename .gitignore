@@ -6,3 +6,8 @@ logs
 .env.*
 llm-urls.cfg
 private-logs
+
+# Editor backup/swap files
+*~
+.*.un~
+.*.swp

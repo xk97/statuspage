@@ -1,0 +1,6 @@
+# Force LF line endings for files that are parsed by bash or read line-by-line
+# by shell scripts, regardless of the checkout platform or local
+# core.autocrlf setting. CRLF endings here break bash parsing (health-check.sh,
+# llm-health-check.sh) and corrupt config parsing (urls.cfg, llm-urls.cfg.example).
+*.sh text eol=lf
+*.cfg text eol=lf
