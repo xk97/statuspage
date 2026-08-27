@@ -1,6 +1,39 @@
 const maxDays = 30;
 
-async function genReportLog(container, key, url) {
+// Client-side-only list of user-added URLs to track, stored in this browser's
+// localStorage. Nothing here is persisted to urls.cfg or the git repo, and no
+// credentials are collected or stored - this is purely a personal, local
+// convenience list scoped to the current browser/device.
+const CUSTOM_URLS_KEY = "statuspage_custom_urls";
+
+function getCustomUrls() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CUSTOM_URLS_KEY));
+    return Array.isArray(raw) ? raw : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveCustomUrls(list) {
+  localStorage.setItem(CUSTOM_URLS_KEY, JSON.stringify(list));
+}
+
+function addCustomUrl(key, url) {
+  const list = getCustomUrls();
+  if (!key || !url || list.some((entry) => entry.key === key)) {
+    return false;
+  }
+  list.push({ key, url });
+  saveCustomUrls(list);
+  return true;
+}
+
+function removeCustomUrl(key) {
+  saveCustomUrls(getCustomUrls().filter((entry) => entry.key !== key));
+}
+
+async function genReportLog(container, key, url, isCustom) {
   const response = await fetch("logs/" + key + "_report.log");
   let statusLines = "";
   if (response.ok) {
@@ -8,11 +41,11 @@ async function genReportLog(container, key, url) {
   }
 
   const normalized = normalizeData(statusLines);
-  const statusStream = constructStatusStream(key, url, normalized);
+  const statusStream = constructStatusStream(key, url, normalized, isCustom);
   container.appendChild(statusStream);
 }
 
-function constructStatusStream(key, url, uptimeData) {
+function constructStatusStream(key, url, uptimeData, isCustom) {
   let streamContainer = templatize("statusStreamContainerTemplate");
   for (var ii = maxDays - 1; ii >= 0; ii--) {
     let line = constructStatusLine(key, ii, uptimeData[ii]);
@@ -31,37 +64,95 @@ function constructStatusStream(key, url, uptimeData) {
   });
 
   const checkNowButton = container.querySelector(".checkNowButton");
-  checkNowButton.addEventListener("click", () => checkNow(checkNowButton, url));
+  const todaySquare = streamContainer.lastElementChild;
+  checkNowButton.addEventListener("click", () =>
+    checkNow(checkNowButton, url, isCustom, todaySquare)
+  );
+
+  if (isCustom) {
+    const statusHeader = container.querySelector(".statusHeader");
+    const removeButton = create("button", "removeUrlButton");
+    removeButton.type = "button";
+    removeButton.innerText = "Remove";
+    removeButton.addEventListener("click", () => {
+      removeCustomUrl(key);
+      renderAllReports();
+    });
+    statusHeader.appendChild(removeButton);
+  }
 
   container.appendChild(streamContainer);
   return container;
 }
 
 // Performs a live, browser-side reachability check against `url` and updates
-// the button's label with the result. This is a manual, ad-hoc check only:
-// it is not persisted to logs/ and does not affect the historical squares.
-// Because most third-party sites block cross-origin reads, the request is
-// made in "no-cors" mode, so we can only detect whether the request settled
+// the button label, status headline, and today's status square with the
+// result. This is a manual, ad-hoc check only: it is not persisted to logs/
+// and does not affect the historical squares for tracked (non-custom)
+// services - those revert back after a few seconds since the log-derived
+// data remains the source of truth for them. For custom (browser-only)
+// entries there is no log data at all, so the check result is kept as the
+// displayed status until the next check or page reload. Because most
+// third-party sites block cross-origin reads, the request is made in
+// "no-cors" mode, so we can only detect whether the request settled
 // (reachable) or threw/timed out (unreachable) - not the exact HTTP status.
-async function checkNow(button, url) {
+async function checkNow(button, url, isCustom, todaySquare) {
+  const container = button.closest(".statusContainer");
+  const headline = container.querySelector(".statusHeadline");
   const originalLabel = button.innerText;
+  const originalHeadlineText = headline.innerText;
+  const originalHeadlineColor = ["success", "failure", "nodata", "partial"].find(
+    (c) => headline.classList.contains(c)
+  );
+  const originalSquareColor = todaySquare
+    ? ["success", "failure", "nodata", "partial"].find((c) =>
+        todaySquare.classList.contains(c)
+      )
+    : null;
+
   button.disabled = true;
   button.innerText = "Checking...";
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
 
+  const setHeadline = (color, text) => {
+    headline.classList.remove("success", "failure", "nodata", "partial");
+    headline.classList.add(color);
+    headline.innerText = text;
+  };
+
+  const setSquare = (color) => {
+    if (!todaySquare) {
+      return;
+    }
+    todaySquare.classList.remove("success", "failure", "nodata", "partial");
+    todaySquare.classList.add(color);
+  };
+
   try {
     await fetch(url, { mode: "no-cors", cache: "no-store", signal: controller.signal });
     button.innerText = "✓ Reachable";
+    setHeadline("success", "Reachable (just now)");
+    setSquare("success");
   } catch (e) {
     button.innerText = "✗ Unreachable";
+    setHeadline("failure", "Unreachable (just now)");
+    setSquare("failure");
   } finally {
     clearTimeout(timeout);
-    setTimeout(() => {
-      button.innerText = originalLabel;
-      button.disabled = false;
-    }, 4000);
+    button.disabled = false;
+    if (!isCustom) {
+      setTimeout(() => {
+        button.innerText = originalLabel;
+        setHeadline(originalHeadlineColor, originalHeadlineText);
+        setSquare(originalSquareColor);
+      }, 5000);
+    } else {
+      setTimeout(() => {
+        button.innerText = originalLabel;
+      }, 5000);
+    }
   }
 }
 
@@ -271,6 +362,16 @@ async function genAllReports() {
   const response = await fetch("urls.cfg");
   const configText = await response.text();
   const configLines = configText.split("\n");
+  const reportsContainer = document.getElementById("reports");
+
+  // Render custom (browser-added) URLs first, newest on top, so they appear
+  // above the statically configured services from urls.cfg.
+  const customUrls = getCustomUrls();
+  for (let ii = customUrls.length - 1; ii >= 0; ii--) {
+    const { key, url } = customUrls[ii];
+    await genReportLog(reportsContainer, key, url, true);
+  }
+
   for (let ii = 0; ii < configLines.length; ii++) {
     const configLine = configLines[ii];
     const [key, url] = configLine.split("=");
@@ -278,6 +379,44 @@ async function genAllReports() {
       continue;
     }
 
-    await genReportLog(document.getElementById("reports"), key, url);
+    await genReportLog(reportsContainer, key.trim(), url.trim(), false);
   }
+}
+
+function renderAllReports() {
+  document.getElementById("reports").innerHTML = "";
+  genAllReports();
+}
+
+function initAddUrlForm() {
+  const addButton = document.getElementById("addUrlButton");
+  if (!addButton) {
+    return;
+  }
+
+  addButton.addEventListener("click", () => {
+    const keyInput = document.getElementById("newUrlKey");
+    const urlInput = document.getElementById("newUrlValue");
+    const key = keyInput.value.trim();
+    const url = urlInput.value.trim();
+    const errorEl = document.getElementById("addUrlError");
+    errorEl.innerText = "";
+
+    if (!key || !url) {
+      errorEl.innerText = "Please provide both a name and a URL.";
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      errorEl.innerText = "URL must start with http:// or https://.";
+      return;
+    }
+    if (!addCustomUrl(key, url)) {
+      errorEl.innerText = "That name is already in use. Choose another.";
+      return;
+    }
+
+    keyInput.value = "";
+    urlInput.value = "";
+    renderAllReports();
+  });
 }
