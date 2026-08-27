@@ -30,8 +30,39 @@ function constructStatusStream(key, url, uptimeData) {
     upTime: uptimeData.upTime,
   });
 
+  const checkNowButton = container.querySelector(".checkNowButton");
+  checkNowButton.addEventListener("click", () => checkNow(checkNowButton, url));
+
   container.appendChild(streamContainer);
   return container;
+}
+
+// Performs a live, browser-side reachability check against `url` and updates
+// the button's label with the result. This is a manual, ad-hoc check only:
+// it is not persisted to logs/ and does not affect the historical squares.
+// Because most third-party sites block cross-origin reads, the request is
+// made in "no-cors" mode, so we can only detect whether the request settled
+// (reachable) or threw/timed out (unreachable) - not the exact HTTP status.
+async function checkNow(button, url) {
+  const originalLabel = button.innerText;
+  button.disabled = true;
+  button.innerText = "Checking...";
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    await fetch(url, { mode: "no-cors", cache: "no-store", signal: controller.signal });
+    button.innerText = "✓ Reachable";
+  } catch (e) {
+    button.innerText = "✗ Unreachable";
+  } finally {
+    clearTimeout(timeout);
+    setTimeout(() => {
+      button.innerText = originalLabel;
+      button.disabled = false;
+    }, 4000);
+  }
 }
 
 function constructStatusLine(key, relDay, upTimeArray) {
